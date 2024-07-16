@@ -25,12 +25,13 @@ class SerialReader(Reader):
     event queue, until stopped.
     """
 
-    def __init__(self, serial_instance, event_queue, reset, target):
-        #  type: (serial.Serial, queue.Queue, bool, str) -> None
+    def __init__(self, serial_instance, event_queue, reset, retry_open, target):
+        #  type: (serial.Serial, queue.Queue, bool, bool, str) -> None
         super(SerialReader, self).__init__()
         self.baud = serial_instance.baudrate
         self.serial = serial_instance
         self.event_queue = event_queue
+        self.retry_open = retry_open
         self.gdb_exit = False
         self.reset = reset
         self.reset_strategy = Reset(serial_instance, target)
@@ -43,16 +44,34 @@ class SerialReader(Reader):
         #  type: () -> None
         if not self.serial.is_open:
             self.serial.baudrate = self.baud
-            try:
-                # We can come to this thread at startup or from external application line GDB.
-                # If we come from GDB we would like to continue to run without reset.
-                self.open_serial(reset=not self.gdb_exit and self.reset)
-            except serial.SerialException as e:
-                print(e)
-                # if connection to port fails suggest other available ports
-                port_list = '\n'.join([p.device for p in list_ports.comports()])
-                yellow_print(f'Connection to {self.serial.portstr} failed. Available ports:\n{port_list}')
-                return
+            printed_failure = False
+            retry_attempts = 0
+            while True:
+                try:
+                    # We can come to this thread at startup or from external application line GDB.
+                    # If we come from GDB we would like to continue to run without reset.
+                    self.open_serial(reset=not self.gdb_exit and self.reset)
+                    if retry_attempts > 0:
+                        # break the retrying line
+                        print("")
+                    break
+                except serial.SerialException as e:
+                    if retry_attempts == 0:
+                        print(e)
+                        if self.retry_open:
+                            # only print this once
+                            yellow_print("Retrying to open port ", newline='')
+                    if self.retry_open:
+                        if retry_attempts % 9 == 0:
+                            # print a dot every second
+                            yellow_print(".", newline='')
+                        time.sleep(0.1)
+                        retry_attempts += 1
+                        continue
+                    # if connection to port fails suggest other available ports
+                    port_list = '\n'.join([p.device for p in list_ports.comports()])
+                    yellow_print(f'Connection to {self.serial.portstr} failed. Available ports:\n{port_list}')
+                    return
             self.gdb_exit = False
         try:
             while self.alive:
