@@ -4,6 +4,7 @@
 import queue  # noqa: F401
 import subprocess  # noqa: F401
 import sys
+import termios
 import time
 
 import serial
@@ -68,7 +69,7 @@ class SerialReader(Reader):
                         data = self.serial.read(self.serial.in_waiting or 1)
                     else:
                         raise serial.PortNotOpenError
-                except (serial.SerialException, IOError) as e:
+                except (serial.SerialException, IOError, OSError, termios.error) as e:
                     data = b''
                     # self.serial.open() was successful before, therefore, this is an issue related to
                     # the disappearance of the device
@@ -85,7 +86,7 @@ class SerialReader(Reader):
                             self.open_serial(reset=self.reset)
                             self.reset = False
                             break  # device connected
-                        except serial.SerialException:
+                        except (serial.SerialException, IOError, OSError, termios.error):
                             if waited_time - last_dot_time > 0.5:
                                 # print a dot every half second
                                 last_dot_time = waited_time
